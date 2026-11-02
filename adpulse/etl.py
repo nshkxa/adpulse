@@ -24,7 +24,7 @@ def extract(platform, report_date, run_id, config=None, revision=0, max_retries=
             attempt+=1; started=utcnow(); t=time.monotonic(); endpoint=f'{BASE_URL}/{slug}/campaigns'
             try:
                 response=requests.get(endpoint,params=params,timeout=timeout); duration=time.monotonic()-t; last_status=response.status_code
-                event={'platform':platform,'page':page,'attempt':attempt,'status':response.status_code,'time':started,'duration':duration,'endpoint':response.url,'error':None,'delay':0}
+                event={'platform':platform,'page':page,'attempt':attempt,'status':response.status_code,'time':started,'duration':duration,'endpoint':response.url,'error':None,'delay':0,'retry_after':response.headers.get('Retry-After')}
                 if response.ok:
                     payload=response.json(); rows,next_page=parse_response(slug,payload)
                     data.extend({'source_platform':platform,'payload':r} for r in rows)
@@ -43,14 +43,14 @@ def extract(platform, report_date, run_id, config=None, revision=0, max_retries=
             except requests.Timeout as e:
                 duration=time.monotonic()-t; error=f'Network timeout after {timeout:.2f}s'; last_status=None
                 can_retry=attempt<=max_retries; delay=backoff(attempt,base_delay,max_delay) if can_retry else 0
-                event={'platform':platform,'page':page,'attempt':attempt,'status':None,'time':started,'duration':duration,'endpoint':endpoint,'error':error,'delay':delay,'event':'retry' if can_retry else 'failed'}
+                event={'platform':platform,'page':page,'attempt':attempt,'status':None,'time':started,'duration':duration,'endpoint':endpoint,'error':error,'delay':delay,'retry_after':None,'event':'retry' if can_retry else 'failed'}
                 db.log_request(run_id,platform,endpoint,page,attempt,None,event['event'],started,duration,delay,error); all_events.append(event)
                 if can_retry: time.sleep(delay); continue
                 return data,all_events,False,last_status
             except requests.RequestException as e:
                 duration=time.monotonic()-t; error=str(e); last_status=None
                 db.log_request(run_id,platform,endpoint,page,attempt,None,'failed',started,duration,0,error)
-                all_events.append({'platform':platform,'page':page,'attempt':attempt,'status':None,'time':started,'duration':duration,'endpoint':endpoint,'error':error,'delay':0,'event':'failed'})
+                all_events.append({'platform':platform,'page':page,'attempt':attempt,'status':None,'time':started,'duration':duration,'endpoint':endpoint,'error':error,'delay':0,'retry_after':None,'event':'failed'})
                 return data,all_events,False,last_status
     return data,all_events,success,last_status
 
@@ -82,12 +82,15 @@ def transform_validate(items,run_id):
 def run_pipeline(report_date, revision=0, injection=None, max_retries=3, base_delay=.35,max_delay=2,timeout=.65, progress=None):
     run_id=str(uuid.uuid4()); started=utcnow(); started_m=time.monotonic(); db.insert_run(run_id,started)
     fetched=[]; events=[]; platform_results=[]; failures=[]
+    injection_configs=[injection] if isinstance(injection,dict) else (injection or [])
+    injections_by_platform={item.get('platform'):item for item in injection_configs}
     try:
         for platform in PLATFORMS.values():
             platform_started=time.monotonic()
             if progress: progress(platform)
-            if injection and injection.get('platform')==SLUGS[platform]:
-                requests.post(f'{BASE_URL}/admin/injection',json=injection,timeout=2)
+            platform_injection=injections_by_platform.get(SLUGS[platform])
+            if platform_injection:
+                requests.post(f'{BASE_URL}/admin/injection',json=platform_injection,timeout=2)
             else: requests.delete(f'{BASE_URL}/admin/injection/{SLUGS[platform]}',timeout=2)
             rows,ev,ok,status=extract(platform,report_date,run_id,injection,revision,max_retries,base_delay,max_delay,timeout)
             fetched.extend(rows); events.extend(ev)

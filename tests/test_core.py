@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from adpulse import db
 from adpulse.etl import parse_response, retry_after, transform_validate
-from adpulse.providers import app, campaigns
+from adpulse.providers import app, campaigns, INJECTIONS
 
 client = TestClient(app)
 
@@ -44,6 +44,18 @@ def test_retry_after_seconds_and_http_date():
     value=format_datetime(future,usegmt=True)
     assert retry_after(value) is not None
     assert retry_after('not a date') is None
+
+def test_simulator_emits_retry_after_then_recovers():
+    INJECTIONS['google']={'scenario':'429','remaining':1,'failures_before_recovery':1,'retry_after':'0.2','calls':0}
+    try:
+        params={'report_date':'2026-11-01','page':1,'page_size':4}
+        limited=client.get('/google/campaigns',params=params)
+        recovered=client.get('/google/campaigns',params=params)
+        assert limited.status_code==429
+        assert limited.headers['Retry-After']=='0.2'
+        assert recovered.status_code==200
+    finally:
+        INJECTIONS.pop('google',None)
 
 def test_upsert_is_idempotent_and_updates(tmp_path,monkeypatch):
     monkeypatch.setattr(db,'DB_PATH',tmp_path/'test.sqlite3')

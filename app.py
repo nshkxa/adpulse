@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from adpulse import db
 from adpulse.providers import app as api_app, PLATFORMS
 from adpulse.etl import run_pipeline, extract, SLUGS, BASE_URL
+from adpulse.tour import render_tour, render_welcome
 FRESHNESS_DAYS=int(os.getenv('ADPULSE_FRESHNESS_DAYS','3'))
 
 st.set_page_config(page_title='AdPulse | Reliable data. Clear decisions.',page_icon='A',layout='wide',initial_sidebar_state='expanded')
@@ -33,12 +34,25 @@ section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:var
 [data-testid="stMetricLabel"]{color:var(--muted)}[data-testid="stMetricValue"]{color:var(--ink);font-family:Manrope}
 div.stButton>button{border-radius:9px;font-weight:600;border:1px solid #dbe5e9;min-height:42px}div.stButton>button[kind="primary"]{background:var(--teal);border-color:var(--teal);color:#062c35}
 .card{background:white;border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700}.small{font-size:13px;color:var(--muted)}.pill{display:inline-block;padding:4px 9px;border-radius:20px;background:#e3f7f4;color:#087970;font-size:12px;font-weight:700}.banner{background:#e8f3ff;border:1px solid #d4e6fc;color:#244c78;border-radius:10px;padding:12px 16px;font-size:13px;margin:12px 0 22px}
+.tour-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#168b87;font-weight:800;margin:4px 0 10px}.tour-simulated{background:#e8f3ff;border:1px solid #d4e6fc;color:#244c78;border-radius:10px;padding:13px 16px;font-size:13px;margin:16px 0 22px}.tour-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px;min-height:150px;margin:8px 0 0;box-shadow:0 4px 14px #17324d08}.tour-card p{font-size:14px;color:var(--muted);margin:8px 0 0}.tour-icon{float:right;background:#e3f7f4;color:#087970;border-radius:10px;padding:8px 11px;font-weight:800}.tour-flow{display:flex;align-items:center;justify-content:space-around;gap:12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;margin:18px 0}.tour-flow strong{color:#087970}.tour-complete{padding:8px}
 </style>''',unsafe_allow_html=True)
+
+st.session_state.setdefault('welcome_seen',False)
+st.session_state.setdefault('active_demo',None)
+if not st.session_state['welcome_seen']:
+    render_welcome()
+    st.stop()
 
 st.sidebar.markdown('# AdPulse')
 st.sidebar.caption('Reliable data. Clear decisions.')
 st.sidebar.markdown('<div class="banner">SIMULATED DEMONSTRATION DATA<br>Local provider responses only. No live ad accounts.</div>',unsafe_allow_html=True)
-page=st.sidebar.radio('Workspace',['Overview','Pipeline Operations','Failure Injection Lab','Database Explorer','Execution History','Marketing Analytics'],label_visibility='collapsed')
+page=st.sidebar.radio('Workspace',['Overview','Pipeline Operations','Failure Injection Lab','Database Explorer','Execution History','Marketing Analytics','Product Walkthrough'],label_visibility='collapsed',key='page_nav')
+def replay_product_walkthrough():
+    st.session_state['active_demo']=None
+    st.session_state['tour_done']=False
+    st.session_state['welcome_seen']=True
+    st.session_state['page_nav']='Product Walkthrough'
+st.sidebar.button('Replay Product Walkthrough',use_container_width=True,on_click=replay_product_walkthrough)
 st.sidebar.markdown('---')
 st.sidebar.caption('Provider service · local FastAPI\nSQLite · transactional UPSERT')
 
@@ -48,6 +62,10 @@ with db.connect() as c:
     logs=pd.read_sql_query('SELECT * FROM api_request_logs ORDER BY id DESC',c)
     rejects=pd.read_sql_query('SELECT * FROM rejected_records ORDER BY id DESC',c)
     platform_runs=pd.read_sql_query('SELECT * FROM platform_run_stats ORDER BY id DESC',c)
+
+if page=='Product Walkthrough':
+    render_tour()
+    st.stop()
 
 def money(v): return f'${v:,.2f}'
 def header(title,sub):
